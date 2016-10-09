@@ -1,5 +1,5 @@
 /*Jordan Merckling, jmerckli, CIS 415 Project 0
-This is my own work, with help from office hours and online resources*/
+This is my own work, with help from office hours and online resources on c functions*/
 
 #include "mentry.h"
 #include <string.h>

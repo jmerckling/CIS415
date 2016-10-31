@@ -99,7 +99,7 @@ int main(int argc,char *argv[])
 		//printf("Processors: %d\n", nprocessors);//delete
 		gettimeofday(&stop, NULL);
 		double t = stop.tv_usec - start.tv_usec;
-		printf("The elapsed time to execute %d copies of \\”%s\\” on %d processors is: %7.3fsec\n", nprocesses, command, nprocessors, t);
+		printf("The elapsed time to execute %d copies of \\”%s\\” on %d processors is: %7.3fmicrosec\n", nprocesses, command, nprocessors, t);
 		//write()
 		
 		

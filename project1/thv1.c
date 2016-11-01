@@ -50,6 +50,11 @@ int main(int argc,char *argv[])
 				//printf("Processors: %d\n", nprocessors);//delete			    
 			}
 	}
+		if(command == NULL);
+		{
+		    p1perror(1, "No command given");
+		    _exit(2);
+		}
 
 		int j = 0;
 
@@ -117,11 +122,9 @@ int main(int argc,char *argv[])
 			waitpid(pid[i], &status, 0);
 		}
 		
-	    	//printf("Command: %s\n", arg[0]);//delete
-		//printf("Processes: %d\n", nprocesses);//delete
-		//printf("Processors: %d\n", nprocessors);//delete
 		gettimeofday(&stop, NULL);
 		float t = (((stop.tv_sec - start.tv_sec) * 1000000L + stop.tv_usec) - start.tv_usec)/1000000.0;
+
 	//	printf("The elapsed time to execute %d copies of \"%s\" on %d processors is: %7.3fsec\n", nprocesses, command, nprocessors, t);
 		//display without printf
 		p1putstr(1, "The elapsed time to execute ");

@@ -142,10 +142,12 @@ int main(int argc,char *argv[])
 		    }
 		for(i = 0; i < nprocesses; i++)
 		    {
+			sleep(3);//test pause
 			kill(pid[i], SIGSTOP);
 		    }
 		for(i = 0; i < nprocesses; i++)
 		    {
+			sleep(3);//test pause
 			kill(pid[i], SIGCONT);
 		    }
 		for(i = 0; i < nprocesses; i++)

@@ -2,7 +2,6 @@
 //CIS 415 Project 1
 //This is my own work
 
-#include <stdio.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -32,19 +31,16 @@ int main(int argc,char *argv[])
             // need to set allocation
             command = (char *) malloc((p1strlen(argv[i] + 1))*sizeof(char));
             p1strcpy(command, argv[i] + p1strlen("--command="));
-            //printf("Command: %s\n", command);//delete
         }
         else if(p1strneq(argv[i], "--number=",  p1strlen("--number=")))
         {
             nprocesses = p1atoi(argv[i] + p1strlen("--number="));
             proc_nums = 1;
-            //printf("Processes: %d\n", nprocesses);//delete
         }
         else if(p1strneq(argv[i], "--processors=", p1strlen("--processors=")))
         {
             nprocessors = p1atoi(argv[i] + p1strlen("--processors="));
             proc_pro = 1;
-            //printf("Processors: %d\n", nprocessors);//delete
         }
     }
     if(command == NULL)
@@ -59,7 +55,7 @@ int main(int argc,char *argv[])
         _exit(0);
     }
 
-    int j = 0;
+int j = 0;
 
     char **arg = malloc(sizeof(char*) * (p1strlen(command)+1));
     for(i = 0; i < p1strlen(command) + 1; i++)
@@ -75,11 +71,7 @@ int main(int argc,char *argv[])
         j++;
         command_location = p1getword(command, command_location, arg[j]);
     }
-    for(j = 0; j < p1strlen(command) + 1; j++)
-	{
-	    free(arg[j]);
-	}
-    free(arg);
+    free(arg[j]);
     arg[j] = NULL;
 
     //if no argument is given for processes set it to TH_NPROCESSES
@@ -88,7 +80,6 @@ int main(int argc,char *argv[])
         char *x;
         if ((x = getenv("TH_NPROCESSORS")) != NULL)
         {
-            // printf("%s\n", x);
             nprocessors = p1atoi(x);
         }
         else
@@ -103,7 +94,6 @@ int main(int argc,char *argv[])
         char *x;
         if ((x = getenv("TH_NPROCESSES")) != NULL)
         {
-            //printf("%s\n", x);
             nprocesses = p1atoi(x);
         }
         else
@@ -128,14 +118,13 @@ int main(int argc,char *argv[])
         int status;
         waitpid(pid[i], &status, 0);
     }
-
+    char ms[10];
+    ms[0] = 0;
     gettimeofday(&stop, NULL);
     float t = (((stop.tv_sec - start.tv_sec) * 1000000L + stop.tv_usec) - start.tv_usec)/1000000.0;
-    int perLeft = (int)t;
-    int perRight = (int)((t-perLeft)*1000);
-
-    //printf("The elapsed time to execute %d copies of \"%s\" on %d processors is: %7.3fsec\n\n", nprocesses, command, nprocessors, t);
-    //display without printf
+    int perLeft = (((stop.tv_sec - start.tv_sec)*1000000L + stop.tv_usec) - start.tv_usec)/1000000;
+    int perRight = (((stop.tv_sec - start.tv_sec)*1000000L + stop.tv_usec) - start.tv_usec)/1000 - perLeft * 1000;
+    
     p1putstr(1, "The elapsed time to execute ");
     p1putint(1, nprocesses);
     p1putstr(1, " copies of \"");
@@ -145,7 +134,16 @@ int main(int argc,char *argv[])
     p1putstr(1, " processors is: ");
     p1putint(1, perLeft);
     p1putstr(1, ".");
-    p1putint(1,perRight);
+    if(perRight < 100)
+    {
+    p1putstr(1,(char*)"0");
+	if(perRight < 10)
+	{
+	    p1putstr(1, (char*)"0");
+	}
+    }
+    p1itoa(perRight, ms);
+    p1putstr(1,ms);
     p1putstr(1, "sec\n");
 
 

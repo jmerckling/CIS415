@@ -12,6 +12,14 @@
 #define BUF_SIZE 1024
 #define MAX_PIDS 1024
 #define MAX_ARGS 512
+#define UNUSED __attribute__((unused))
+
+int USR1_received = 0;
+
+void USR1_handler(UNUSED int signo)
+{
+    USR1_received++;
+}
 
 int main(int argc,char *argv[])
 {
@@ -23,6 +31,11 @@ int main(int argc,char *argv[])
     pid_t pid[MAX_PIDS];
     int proc_nums = 0;
     int proc_pro = 0;
+
+    if(signal(SIGUSR1, USR1_handler) == SIG_ERR)
+    {
+        return -1;
+    }
 
     for(i = 1; i < argc; i++)
     {
@@ -45,17 +58,11 @@ int main(int argc,char *argv[])
     }
     if(command == NULL)
     {
-        p1perror(2, "No command given");
-        _exit(0);
+        p1perror(1, "No command given");
+        _exit(2);
     }
 
-    if(argc > 4)
-    {
-        p1perror(2, "Too many arguments");
-        _exit(0);
-    }
-
-int j = 0;
+    int j = 0;
 
     char **arg = malloc(sizeof(char*) * (p1strlen(command)+1));
     for(i = 0; i < p1strlen(command) + 1; i++)
@@ -109,15 +116,33 @@ int j = 0;
         pid[i] = fork();
         if(pid[i] == 0)
         {
+            while(! USR1_received)//wait until USR1 is received
+            {
+                sleep(1);
+            }
             execvp(arg[0], arg);
         }
     }
 
     for(i = 0; i < nprocesses; i++)
     {
-        int status;
-        waitpid(pid[i], &status, 0);
+        kill(pid[i], SIGUSR1);
     }
+    for(i = 0; i < nprocesses; i++)
+    {
+        //sleep(3);//test pause
+        kill(pid[i], SIGSTOP);
+    }
+    for(i = 0; i < nprocesses; i++)
+    {
+        //sleep(3);//test pause
+        kill(pid[i], SIGCONT);
+    }
+    for(i = 0; i < nprocesses; i++)
+    {
+        waitpid(pid[i], NULL, 0);
+    }
+
     char ms[10];
     ms[0] = 0;
     gettimeofday(&stop, NULL);
@@ -150,3 +175,7 @@ int j = 0;
     free(command);
     return 1;
 }//end main
+
+
+
+

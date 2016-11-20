@@ -21,10 +21,10 @@
 
 FreeSectorDescriptorStore *fsds;
 DiskDevice *disk;
-BoundedBuffer *workQ;
-BoundedBuffer *readQ;
-pthread_mutex_t vmutex;
-pthread_cond_t vcond = PTHREAD_COND_INITIALIZER;
+BoundedBuffer *incoming;
+BoundedBuffer *read_buf;
+pthread_mutex_t mute;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 
 //defining the structure of the voucher
@@ -43,13 +43,13 @@ void *write() {
 	int status;
 
 	while (1) {
-		vou = (Vouchers *) blockingReadBB(workQ);				
+		vou = (Vouchers *) blockingReadBB(incoming);				
 		status = write_sector(disk, (vou)->sd);
-		fprintf(stderr,"Status: %d\n",status);
-		pthread_mutex_lock(&vmutex);
+		//fprintf(stderr,"Status: %d\n",status);
+		pthread_mutex_lock(&mute);
 		(vou)->status = status;
-		pthread_cond_broadcast(&vcond);
-		pthread_mutex_unlock(&vmutex);
+		pthread_cond_broadcast(&cond);
+		pthread_mutex_unlock(&mute);
 		blocking_put_sd(fsds, (vou)->sd);
 	}
 }
@@ -63,13 +63,13 @@ void *read() {
 	int status;
 
 	while (1) {
-		vou = (Vouchers *) blockingReadBB(readQ);
+		vou = (Vouchers *) blockingReadBB(read_buf);
 		status = read_sector(disk, vou->sd);
 
-		pthread_mutex_lock(&vmutex); 
+		pthread_mutex_lock(&mute); 
 		vou->status = status;
-		pthread_cond_broadcast(&vcond);
-		pthread_mutex_unlock(&vmutex);
+		pthread_cond_broadcast(&cond);
+		pthread_mutex_unlock(&mute);
 	}
 }
 
@@ -91,8 +91,8 @@ void init_disk_driver(DiskDevice *dd, void *mem_start, unsigned long mem_length,
 	create_free_sector_descriptors(*fsds_ptr, mem_start, mem_length);
 	fsds = *fsds_ptr;
     
-	workQ = createBB(SIZE);
-	readQ = createBB(SIZE);
+	incoming = createBB(SIZE);
+	read_buf = createBB(SIZE);
 
     pthread_t workThread;
 	if (pthread_create(&workThread, NULL, write, NULL)) {
@@ -132,7 +132,7 @@ void blocking_write_sector(SectorDescriptor *sd, Voucher **v) {
 
 	*v = (Voucher *) vou;
 
-	blockingWriteBB(workQ, vou);
+	blockingWriteBB(incoming, vou);
 
 }
 
@@ -144,7 +144,7 @@ int nonblocking_write_sector(SectorDescriptor *sd, Voucher **v) {
 
 	*v = (Voucher *) vou;
 
-	return nonblockingWriteBB(workQ, vou);
+	return nonblockingWriteBB(incoming, vou);
 
 }
 
@@ -167,7 +167,7 @@ void blocking_read_sector(SectorDescriptor *sd, Voucher **v) {
 
 	*v = (Voucher *) vou;
 
-	blockingWriteBB(readQ, vou);
+	blockingWriteBB(read_buf, vou);
 
 }
 int nonblocking_read_sector(SectorDescriptor *sd, Voucher **v) {
@@ -178,7 +178,7 @@ int nonblocking_read_sector(SectorDescriptor *sd, Voucher **v) {
 
 	*v = (Voucher *) vou;
 
-	return nonblockingWriteBB(readQ, vou);
+	return nonblockingWriteBB(read_buf, vou);
 
 }
 
@@ -193,17 +193,17 @@ int redeem_voucher(Voucher *v, SectorDescriptor **sd) {
 	Vouchers *vou = (Vouchers *) v;
 	int status;
 
-	pthread_mutex_lock(&vmutex); 
+	pthread_mutex_lock(&mute); 
 	while (vou->status == -1) {
-		pthread_cond_wait(&vcond, &vmutex);
+		pthread_cond_wait(&cond, &mute);
 	}
 	*sd = vou->sd;
 	status = vou->status;
 	free(vou);
     //free(v);
-	pthread_mutex_unlock(&vmutex);
-    pthread_mutex_destroy(&vmutex);
-    pthread_cond_destroy(&vcond);
+	pthread_mutex_unlock(&mute);
+    pthread_mutex_destroy(&mute);
+    pthread_cond_destroy(&cond);
 	
 	return status;
 }

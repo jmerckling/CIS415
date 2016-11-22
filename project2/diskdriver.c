@@ -1,35 +1,18 @@
 #include "diskdriver.h"
+#include "BoundedBuffer.h"
 #include "sectordescriptorcreator.h"
 #include "freesectordescriptorstore_full.h"
-#include "BoundedBuffer.h"
 #include "sectordescriptor.h"
-#include "block.h"
-#include "diagnostics.h"
-#include "diskdevice_full.h"
-#include "diskdevice.h"
-#include "fakeapplications.h"
-#include "freesectordescriptorstore.h"
-#include "generic_queue.h"
-#include "sectordescriptor.h"
-#include "sectordescriptorcreator.h"
-#include "voucher.h"
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-#define SIZE 20
+#define SIZE 100
+#define VSIZE 30
 
-static Voucher writev;
-static Voucher readv;
-
-
-FreeSectorDescriptorStore *fsds;
-DiskDevice *disk;
-BoundedBuffer *writeBB;
-BoundedBuffer *readBB;
-//possibly put in struct?
-pthread_mutex_t mute;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+//static Voucher writev;
+//static Voucher readv;
 
 
 //Structure for voucher
@@ -39,34 +22,32 @@ typedef struct voucher
 	SectorDescriptor* sd;
 	pthread_mutex_t mute;
 	pthread_cond_t cond;
-	int read_write; // 1 if read else 0;
+	int read_write; // 0 if read 1 for write;
+	int completed;
 } Voucher;
 
+FreeSectorDescriptorStore *fsds_in;
+DiskDevice *disk;
+pthread_t tRead;
+pthread_t tWrite;
+BoundedBuffer *writeBB;
+BoundedBuffer *readBB;
+BoundedBuffer *vouchBB;
+Voucher vouchers[VSIZE];
 
-//defining the write function.
-//main usage is to write onto the sector.
-
+//Function to write onto a sector
 void *write() 
 {
 	while (1) 
 	{
-		Voucher *writev = (Voucher *) blockingReadBB(writeBB);
+		Voucher *writev = blockingReadBB(writeBB);
 		pthread_mutex_lock(&(writev->mute));
-		int status = write_sector(disk, (writev)->sd);
-
-		if(status == 0)
-		{
-			pthread_cond_wait(&(writev->cond), &writev->mute);
-            pthread_mutex_unlock(&(writev->mute));
-		}
-
-		writev->status = status;
-		pthread_cond_broadcast(&(writev->cond));
+		writev->status = write_sector(disk, (writev->sd));
+		writev->completed = 1;
+		pthread_cond_signal(&(writev->cond));
 		pthread_mutex_unlock(&(writev->mute));
-		//blocking_put_sd(fsds, writev->sd);
 	}
 }
-
 
 // defining the write function
 // main usage is to read for a certain sector
@@ -74,18 +55,11 @@ void *read()
 {
 	while (1) 
 	{		
-		Voucher *readv = (Voucher *) blockingReadBB(writeBB);
+		Voucher *readv = blockingReadBB(readBB);
 		pthread_mutex_lock(&(readv->mute));
-		int status = write_sector(disk, (readv)->sd);
-
-		if(status == 0)
-		{
-			pthread_cond_wait(&(readv->cond), &readv->mute);
-            pthread_mutex_unlock(&(readv->mute));
-		}
-
-		readv->status = status;
-		pthread_cond_broadcast(&(readv->cond));
+		readv->status = read_sector(disk, (readv->sd));
+		readv->completed = 1;
+		pthread_cond_signal(&(readv->cond));
 		pthread_mutex_unlock(&(readv->mute));
 
 	}
@@ -102,35 +76,36 @@ void *read()
  *             from the memory provided in the two previous arguments
  
  */
-void init_disk_driver(DiskDevice *dd, void *mem_start, unsigned long mem_length, FreeSectorDescriptorStore **fsds_ptr) 
+void init_disk_driver(DiskDevice *dd, void *mem_start, unsigned long mem_length, FreeSectorDescriptorStore **fsds) 
 {
-	disk = dd;	
-	*fsds_ptr = create_fsds();
-	create_free_sector_descriptors(*fsds_ptr, mem_start, mem_length);
-	fsds = *fsds_ptr;
-    
-	writeBB = createBB(SIZE);
-	readBB = createBB(SIZE);
+	disk = dd;
+	fsds_in = create_fsds();
+	*fsds = fsds_in;
+	vouchBB = createBB(VSIZE * sizeof(Voucher *)); 
+	create_free_sector_descriptors(*fsds, mem_start, mem_length);
 
-    pthread_t workThread;
-	if (pthread_create(&workThread, NULL, write, NULL)) 
+	int i;
+	for(i = 0; i < VSIZE; i++)
+	{
+		pthread_mutex_init(&(vouchers[i].mute), NULL);
+		pthread_cond_init(&(vouchers[i].cond), NULL);
+		vouchers[i].completed = 0;
+		blockingWriteBB(vouchBB, &vouchers[i]);
+	}
+	readBB = createBB(SIZE);
+	writeBB = createBB(SIZE);
+
+	if (pthread_create(&tWrite, NULL, write, NULL)) 
 	{
 		printf("Error: failed to create writing thread\n");
-		exit(1);
-	} else 
-	{
-        printf ("Write Thread Created");
-    }
+//		exit(1);
+	}
    
-    pthread_t readThread;
-	if (pthread_create(&readThread, NULL, read, NULL)) 
+	if (pthread_create(&tRead, NULL, read, NULL)) 
 	{
 		printf("Error: failed to create reading thread\n");
-		exit(1);
-	}else 
-	{
-        printf ("Read Thread Created");
-    }
+//		exit(1);
+	}
 }
 
 /*
@@ -142,30 +117,32 @@ void init_disk_driver(DiskDevice *dd, void *mem_start, unsigned long mem_length,
  * neither call should delay until the sector is actually written to the disk
  * for a successful nonblocking call and for the blocking call, a voucher is
  * returned that is required to determine the success/failure of the write
- 
  */
 void blocking_write_sector(SectorDescriptor *sd, Voucher **v) 
 {
-	writev.read_write = 0;
-	writev.status = 0;
-	writev.sd = sd;
-	pthread_mutex_init(&(writev.mute), NULL);
-    pthread_cond_init(&(writev.cond), NULL);
-
-	*v = &writev;
+	Voucher *writev = blockingReadBB(vouchBB);
+	writev->read_write = 1;
+	writev->completed = 0;
+	writev->sd = sd;
+	*v = writev;
 	blockingWriteBB(writeBB, *v);
 }
 
 int nonblocking_write_sector(SectorDescriptor *sd, Voucher **v) 
 {
-	writev.read_write = 0;
-	writev.status = 0;
-	writev.sd = sd;
-	pthread_mutex_init(&(writev.mute), NULL);
-    pthread_cond_init(&(writev.cond), NULL);
-
-	*v = &writev;
-	return nonblockingWriteBB(writeBB, *v);
+	Voucher *writev = blockingReadBB(vouchBB);
+	writev->read_write = 1;
+	writev->completed = 0;
+	writev->sd = sd;
+	//*v = writev;
+	int test = nonblockingWriteBB(writeBB, writev);
+	if(test==1)
+	{
+		*v = writev;
+		return 1;
+	}
+	nonblockingWriteBB(vouchBB, writev);
+	return 0;
 }
 
 /*
@@ -180,26 +157,31 @@ int nonblocking_write_sector(SectorDescriptor *sd, Voucher **v)
  */
 void blocking_read_sector(SectorDescriptor *sd, Voucher **v) 
 {
-	readv.read_write = 1;
-	readv.status = 0;
-	readv.sd = sd;
-	pthread_mutex_init(&(readv.mute), NULL);
-    pthread_cond_init(&(readv.cond), NULL);
+	Voucher *readv = blockingReadBB(vouchBB);
+	readv->read_write = 0;
+	readv->completed = 0;
+	readv->sd = sd;
+	*v = readv;
 
-	*v = &readv;
 	blockingWriteBB(readBB, *v);
 }
 
 int nonblocking_read_sector(SectorDescriptor *sd, Voucher **v) 
 {
-	readv.read_write = 1;
-	readv.status = 0;
-	readv.sd = sd;
-	pthread_mutex_init(&(readv.mute), NULL);
-    pthread_cond_init(&(readv.cond), NULL);
+	Voucher *readv = blockingReadBB(vouchBB);
+	readv->read_write = 0;
+	readv->completed = 0;
+	readv->sd = sd;
+//	*v = readv;
 
-	*v = &readv;
-	return nonblockingWriteBB(readBB, *v);
+	int test = nonblockingWriteBB(readBB, readv);
+	if(test == 1)
+	{
+		*v = readv;
+		return 1;
+	}
+	nonblockingWriteBB(vouchBB, readv);
+	return 0;
 }
 
 /*
@@ -208,54 +190,37 @@ int nonblocking_read_sector(SectorDescriptor *sd, Voucher **v)
  * the calling application is blocked until the read/write has completed
  * if a successful read, the associated SectorDescriptor is returned in sd
  */
-/*int redeem_voucher(Voucher *v, SectorDescriptor **sd) 
-{
-    if (v == NULL)
-	{
-        printf("DRIVER: null voucher redeemed!\n");
-        return 0;
-    }
-    else
-	{
-        pthread_mutex_lock(&(v->mute));
-        if (v->read_write == 1)
-		{
-            *sd = v->sd;
-        }
-        else if (v->sd != NULL)
-		{
-            blocking_put_sd(fsds, v->sd);
-        }
-        pthread_cond_destroy(&(v->cond));
-        pthread_mutex_unlock(&(v->mute));
-        pthread_mutex_destroy(&(v->mute));
-        if (v->status == 1)
-		{
-            return 1;
-        }
-        else
-		{
-            return 0;
-        }
-	}
-}
-*/
-int redeem_voucher(Voucher *v, SectorDescriptor **sd) {
+int redeem_voucher(Voucher *v, SectorDescriptor**sd){
 
-	Vouchers *vou = (Vouchers *) v;
-	int status;
-
-	pthread_mutex_lock(&(v->mute)); 
-	while (v->status == 0) {
-		pthread_cond_wait(&(v->cond), &v->mutex);
+	if(v == NULL)
+	{
+		fprintf(stderr, "null voucher has been redeemed!\n");
+		return 0;
 	}
-	*sd = v->sd;
-	status = v->status;
-	//free(vou);
-    //free(v);
-	pthread_mutex_unlock(&(v->mutex));
-    pthread_mutex_destroy(&(v->mutex));
-    pthread_cond_destroy(&(v->cond));
+	else
+	{
+		pthread_mutex_lock(&(v->mute));
 	
-	return status;
+		while(v->completed != 1)
+		{
+			pthread_cond_wait(&v->cond,&v->mute);
+		}
+		if(v->status == 1)
+		{
+			if(v->read_write == 1)
+			{
+				*sd = v->sd;
+			}
+		}	
+
+		if((v->read_write) ==0)
+		{
+			blocking_put_sd(fsds_in, v->sd);
+		}
+
+		v->completed = 0;
+		blockingWriteBB(vouchBB, v);
+		pthread_mutex_unlock(&(v->mute));
+		return v->status;
+	}
 }

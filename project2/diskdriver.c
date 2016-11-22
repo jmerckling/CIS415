@@ -208,7 +208,7 @@ int nonblocking_read_sector(SectorDescriptor *sd, Voucher **v)
  * the calling application is blocked until the read/write has completed
  * if a successful read, the associated SectorDescriptor is returned in sd
  */
-int redeem_voucher(Voucher *v, SectorDescriptor **sd) 
+/*int redeem_voucher(Voucher *v, SectorDescriptor **sd) 
 {
     if (v == NULL)
 	{
@@ -217,20 +217,15 @@ int redeem_voucher(Voucher *v, SectorDescriptor **sd)
     }
     else
 	{
-		//lock voucher to prevent inconsistency in the data
         pthread_mutex_lock(&(v->mute));
-
         if (v->read_write == 1)
 		{
             *sd = v->sd;
         }
         else if (v->sd != NULL)
 		{
-			//return sd to store
             blocking_put_sd(fsds, v->sd);
         }
-
-		//clear voucher pthread variables
         pthread_cond_destroy(&(v->cond));
         pthread_mutex_unlock(&(v->mute));
         pthread_mutex_destroy(&(v->mute));
@@ -243,4 +238,24 @@ int redeem_voucher(Voucher *v, SectorDescriptor **sd)
             return 0;
         }
 	}
+}
+*/
+int redeem_voucher(Voucher *v, SectorDescriptor **sd) {
+
+	Vouchers *vou = (Vouchers *) v;
+	int status;
+
+	pthread_mutex_lock(&(v->mute)); 
+	while (v->status == 0) {
+		pthread_cond_wait(&(v->cond), &v->mutex);
+	}
+	*sd = v->sd;
+	status = v->status;
+	//free(vou);
+    //free(v);
+	pthread_mutex_unlock(&(v->mutex));
+    pthread_mutex_destroy(&(v->mutex));
+    pthread_cond_destroy(&(v->cond));
+	
+	return status;
 }
